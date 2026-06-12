@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: video-chat-app
+    env: node
+    plan: free
+    buildCommand: "cd backend && npm install && cd ../frontend && npm install && npm run build && cp -r dist/* ../backend/public/"
+    startCommand: "cd backend && node server.js"
+    envVars:
+      - key: NODE_ENV
+        value: production
