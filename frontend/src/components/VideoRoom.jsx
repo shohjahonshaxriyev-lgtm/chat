@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Mic, MicOff, VideoIcon, VideoOff, PhoneOff, Monitor, Copy } from 'lucide-react';
 import socket from '../socket';
-
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -11,14 +10,12 @@ const ICE_SERVERS = {
     { urls: 'stun:stun4.l.google.com:19302' },
   ]
 };
-
 const VideoRoom = ({ roomId, onLeave }) => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteUserIdRef = useRef(null);
-
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -27,20 +24,17 @@ const VideoRoom = ({ roomId, onLeave }) => {
   const [callDuration, setCallDuration] = useState(0);
   const [statusText, setStatusText] = useState('Kamera yuklanmoqda...');
   const timerRef = useRef(null);
-
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
     const s = (seconds % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
-
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       setCallDuration(prev => prev + 1);
     }, 1000);
   }, []);
-
   const cleanup = useCallback(() => {
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
@@ -51,18 +45,15 @@ const VideoRoom = ({ roomId, onLeave }) => {
       timerRef.current = null;
     }
   }, []);
-
   const createPeerConnection = useCallback((targetId) => {
     // Clean up any existing connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
     }
-
     console.log('[WebRTC] PeerConnection yaratilmoqda, target:', targetId);
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peerConnectionRef.current = pc;
     remoteUserIdRef.current = targetId;
-
     // Add ALL local tracks to the connection
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
@@ -70,7 +61,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
         pc.addTrack(track, localStreamRef.current);
       });
     }
-
     // Handle incoming remote stream
     pc.ontrack = (event) => {
       console.log('[WebRTC] Remote track olindi:', event.track.kind);
@@ -82,7 +72,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
       setStatusText('Ulangan');
       startTimer();
     };
-
     // Send ICE candidates to the other user
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -93,7 +82,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
         });
       }
     };
-
     pc.oniceconnectionstatechange = () => {
       console.log('[WebRTC] ICE holati:', pc.iceConnectionState);
       if (pc.iceConnectionState === 'connected') {
@@ -108,17 +96,13 @@ const VideoRoom = ({ roomId, onLeave }) => {
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
       }
     };
-
     pc.onnegotiationneeded = () => {
       console.log('[WebRTC] Negotiation kerak');
     };
-
     return pc;
   }, [startTimer]);
-
   useEffect(() => {
     let mounted = true;
-
     const init = async () => {
       // 1. Get camera & microphone
       try {
@@ -127,109 +111,77 @@ const VideoRoom = ({ roomId, onLeave }) => {
           video: { 
             width: { ideal: 1280 }, 
             height: { ideal: 720 },
-            facingMode: 'user'
-          },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true
-          }
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          audio: { echoCancellation: true, noiseSuppression: true }
         });
         
+        if (!mounted) return;
         localStreamRef.current = stream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
-        console.log('[Media] Kamera tayyor! Tracklar:', stream.getTracks().map(t => t.kind));
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
         setStatusText('Do\'stingizni kutmoqdamiz...');
-        
-        // Announce we are ready in the room
         socket.emit('ready', roomId);
       } catch (err) {
-        console.error('[Media] Kamera xatosi:', err);
         setStatusText('Kamera yoki mikrofon ruxsati berilmadi!');
         return;
       }
-
-      // 2. Socket events
       socket.on('user-ready', async (userId) => {
         if (!mounted) return;
-        console.log('[Socket] Foydalanuvchi tayyor:', userId);
-        setStatusText('Ulanmoqda...');
-        
         const pc = createPeerConnection(userId);
-        
         try {
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true
-          });
+          const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          console.log('[WebRTC] Offer jo\'natildi');
           socket.emit('offer', { target: userId, sdp: pc.localDescription });
         } catch (err) {
           console.error('[WebRTC] Offer xatosi:', err);
         }
       });
-
       socket.on('offer', async (data) => {
         if (!mounted) return;
-        console.log('[Socket] Offer olindi:', data.caller);
-        setStatusText('Ulanmoqda...');
-        
         const pc = createPeerConnection(data.caller);
-        
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          await flushIceQueue(pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          console.log('[WebRTC] Answer jo\'natildi');
           socket.emit('answer', { target: data.caller, sdp: pc.localDescription });
         } catch (err) {
           console.error('[WebRTC] Answer xatosi:', err);
         }
       });
-
       socket.on('answer', async (data) => {
         if (!mounted) return;
-        console.log('[Socket] Answer olindi');
-        if (peerConnectionRef.current && peerConnectionRef.current.signalingState !== 'stable') {
+        if (peerConnectionRef.current) {
           try {
-            await peerConnectionRef.current.setRemoteDescription(
-              new RTCSessionDescription(data.sdp)
-            );
+            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            await flushIceQueue(peerConnectionRef.current);
           } catch (err) {
             console.error('[WebRTC] setRemoteDescription xatosi:', err);
           }
         }
       });
-
       socket.on('ice-candidate', async (data) => {
         if (!mounted) return;
-        if (peerConnectionRef.current) {
+        const pc = peerConnectionRef.current;
+        if (pc && pc.remoteDescription) {
           try {
-            await peerConnectionRef.current.addIceCandidate(
-              new RTCIceCandidate(data.candidate)
-            );
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
           } catch (err) {
             console.error('[WebRTC] ICE candidate xatosi:', err);
           }
+        } else {
+          iceCandidatesQueue.current.push(data.candidate);
         }
       });
-
       socket.on('user-left', () => {
         if (!mounted) return;
-        console.log('[Socket] Foydalanuvchi chiqib ketdi');
         setIsConnected(false);
         setIsWaiting(true);
-        setStatusText('Do\'stingiz chiqib ketdi. Kutmoqdamiz...');
-        setCallDuration(0);
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+        setStatusText('Do\'stingiz chiqib ketdi.');
         cleanup();
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
       });
     };
-
     init();
-
     return () => {
       mounted = false;
       socket.off('user-ready');
@@ -239,8 +191,7 @@ const VideoRoom = ({ roomId, onLeave }) => {
       socket.off('user-left');
       cleanup();
     };
-  }, [createPeerConnection, cleanup]);
-
+  }, [createPeerConnection, cleanup, roomId]);
   const handleEndCall = () => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
@@ -249,7 +200,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
     socket.disconnect();
     onLeave();
   };
-
   const toggleMute = () => {
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
@@ -259,7 +209,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
       }
     }
   };
-
   const toggleVideo = () => {
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
@@ -269,13 +218,11 @@ const VideoRoom = ({ roomId, onLeave }) => {
       }
     }
   };
-
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
   return (
     <div className="h-screen flex flex-col bg-surface">
       {/* Top Bar */}
@@ -297,7 +244,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
           </button>
         </div>
       </div>
-
       {/* Video Area */}
       <div className="flex-1 relative p-2 md:p-4">
         {/* Remote Video (Full screen) */}
@@ -326,7 +272,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
             />
           )}
         </div>
-
         {/* Local Video (Picture-in-Picture) */}
         <div className="absolute bottom-4 right-4 md:bottom-8 md:right-8 w-32 h-24 md:w-56 md:h-40 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl bg-surface-light">
           <video
@@ -344,7 +289,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
           )}
         </div>
       </div>
-
       {/* Controls Bar */}
       <div className="h-20 md:h-24 flex items-center justify-center gap-4 md:gap-5 glass border-t border-white/5">
         <button
@@ -354,7 +298,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
         >
           {isMuted ? <MicOff size={22} /> : <Mic size={22} />}
         </button>
-
         <button
           onClick={toggleVideo}
           className={`btn-control ${isVideoOff ? 'bg-danger/20 text-danger' : 'bg-surface-lighter text-white hover:bg-surface-lighter/70'}`}
@@ -362,7 +305,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
         >
           {isVideoOff ? <VideoOff size={22} /> : <VideoIcon size={22} />}
         </button>
-
         <button
           onClick={handleEndCall}
           className="btn-control bg-danger text-white hover:bg-red-600 w-16 h-16 shadow-lg shadow-danger/30"
@@ -374,5 +316,4 @@ const VideoRoom = ({ roomId, onLeave }) => {
     </div>
   );
 };
-
 export default VideoRoom;
