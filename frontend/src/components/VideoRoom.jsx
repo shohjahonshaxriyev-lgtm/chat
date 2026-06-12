@@ -101,6 +101,8 @@ const VideoRoom = ({ roomId, onLeave }) => {
     };
     return pc;
   }, [startTimer]);
+  const iceCandidatesQueue = useRef([]);
+
   useEffect(() => {
     let mounted = true;
     const init = async () => {
@@ -108,9 +110,6 @@ const VideoRoom = ({ roomId, onLeave }) => {
       try {
         console.log('[Media] Kamera va mikrofon so\'ralmoqda...');
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 },
           video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
           audio: { echoCancellation: true, noiseSuppression: true }
         });
@@ -124,6 +123,18 @@ const VideoRoom = ({ roomId, onLeave }) => {
         setStatusText('Kamera yoki mikrofon ruxsati berilmadi!');
         return;
       }
+
+      const flushIceQueue = async (pc) => {
+        while (iceCandidatesQueue.current.length > 0) {
+          const c = iceCandidatesQueue.current.shift();
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(c));
+          } catch (e) {
+            console.error('ICE xato:', e);
+          }
+        }
+      };
+
       socket.on('user-ready', async (userId) => {
         if (!mounted) return;
         const pc = createPeerConnection(userId);
