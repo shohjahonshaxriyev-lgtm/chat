@@ -5,8 +5,7 @@ const SOCKET_URL = window.location.origin;
 
 const socket = io(SOCKET_URL, {
   autoConnect: false,
-  rejectUnauthorized: false,
-  transports: ['websocket']
+  rejectUnauthorized: false
 });
 
 export default socket;
